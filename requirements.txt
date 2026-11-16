@@ -1,0 +1,9 @@
+numpy
+pandas
+gymnasium
+mo-gymnasium
+morl-baselines
+pettingzoo
+traci
+sumolib
+matplotlib

@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2026-10-12T15:33:38.782198+01:00 by Eclipse SUMO netedit 1.27.1
+<neteditConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/neteditConfiguration.xsd">
+
+    <input>
+        <sumo-net-file value="/home/nikita/dev/msc_thesis/AI_agens_konyvtar/AI_agens_konyvtar/mega_catalogue_final.net.xml"/>
+    </input>
+
+    <output>
+        <output-file value="/home/nikita/dev/msc_thesis/AI_agens_konyvtar/AI_agens_konyvtar/mega_catalogue_final.net.xml"/>
+    </output>
+
+    <processing>
+        <geometry.min-radius.fix.railways value="false"/>
+        <geometry.avoid-overlap value="false"/>
+        <geometry.max-grade.fix value="false"/>
+        <offset.disable-normalization value="true"/>
+    </processing>
+
+    <junctions>
+        <no-turnarounds value="true"/>
+    </junctions>
+
+</neteditConfiguration>
+-->
+
+<net version="1.20" junctionCornerDetail="5" limitTurnSpeed="5.50" avoidOverlap="0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/net_file.xsd">
+
+    <location netOffset="100.00,100.00" convBoundary="500.00,500.00,700.00,700.00" origBoundary="-100.00,-100.00,2150.00,1570.00" projParameter="!"/>
+
+    <edge id=":R3C2_C_0" function="internal">
+        <lane id=":R3C2_C_0_0" index="0" speed="6.51" length="9.03" shape="598.40,613.60 598.05,611.15 597.00,609.40 595.25,608.35 592.80,608.00"/>
+    </edge>
+    <edge id=":R3C2_C_1" function="internal">
+        <lane id=":R3C2_C_1_0" index="0" speed="8.33" length="27.20" shape="598.40,613.60 598.40,586.40"/>
+    </edge>
+    <edge id=":R3C2_C_2" function="internal">
+        <lane id=":R3C2_C_2_0" index="0" speed="9.32" length="7.05" shape="598.40,613.60 598.95,606.95 599.08,606.59"/>
+    </edge>
+    <edge id=":R3C2_C_14" function="internal">
+        <lane id=":R3C2_C_14_0" index="0" speed="9.32" length="12.57" shape="599.08,606.59 600.60,602.20 603.35,599.35 607.20,598.40"/>
+    </edge>
+    <edge id=":R3C2_C_3" function="internal">
+        <lane id=":R3C2_C_3_0" index="0" speed="6.51" length="9.03" shape="607.20,608.00 604.75,608.35 603.00,609.40 601.95,611.15 601.60,613.60"/>
+    </edge>
+    <edge id=":R3C2_C_4" function="internal">
+        <lane id=":R3C2_C_4_0" index="0" speed="13.89" length="14.40" shape="607.20,608.00 592.80,608.00"/>
+        <lane id=":R3C2_C_4_1" index="1" speed="13.89" length="14.40" shape="607.20,604.80 592.80,604.80"/>
+        <lane id=":R3C2_C_4_2" index="2" speed="13.89" length="14.40" shape="607.20,601.60 592.80,601.60"/>
+    </edge>
+    <edge id=":R3C2_C_7" function="internal">
+        <lane id=":R3C2_C_7_0" index="0" speed="6.51" length="9.03" shape="601.60,586.40 601.95,588.85 603.00,590.60 604.75,591.65 607.20,592.00"/>
+    </edge>
+    <edge id=":R3C2_C_8" function="internal">
+        <lane id=":R3C2_C_8_0" index="0" speed="8.33" length="27.20" shape="601.60,586.40 601.60,613.60"/>
+    </edge>
+    <edge id=":R3C2_C_9" function="internal">
+        <lane id=":R3C2_C_9_0" index="0" speed="9.32" length="7.05" shape="601.60,586.40 601.05,593.05 600.92,593.41"/>
+    </edge>
+    <edge id=":R3C2_C_15" function="internal">
+        <lane id=":R3C2_C_15_0" index="0" speed="9.32" length="12.57" shape="600.92,593.41 599.40,597.80 596.65,600.65 592.80,601.60"/>
+    </edge>
+    <edge id=":R3C2_C_10" function="internal">
+        <lane id=":R3C2_C_10_0" index="0" speed="6.51" length="9.03" shape="592.80,592.00 595.25,591.65 597.00,590.60 598.05,588.85 598.40,586.40"/>
+    </edge>
+    <edge id=":R3C2_C_11" function="internal">
+        <lane id=":R3C2_C_11_0" index="0" speed="13.89" length="14.40" shape="592.80,592.00 607.20,592.00"/>
+        <lane id=":R3C2_C_11_1" index="1" speed="13.89" length="14.40" shape="592.80,595.20 607.20,595.20"/>
+        <lane id=":R3C2_C_11_2" index="2" speed="13.89" length="14.40" shape="592.80,598.40 607.20,598.40"/>
+    </edge>
+
+    <edge id="e32_main_ce" from="R3C2_C" to="R3C2_E" priority="3">
+        <lane id="e32_main_ce_0" index="0" speed="13.89" length="92.80" shape="607.20,592.00 700.00,592.00"/>
+        <lane id="e32_main_ce_1" index="1" speed="13.89" length="92.80" shape="607.20,595.20 700.00,595.20"/>
+        <lane id="e32_main_ce_2" index="2" speed="13.89" length="92.80" shape="607.20,598.40 700.00,598.40"/>
+    </edge>
+    <edge id="e32_main_cw" from="R3C2_C" to="R3C2_W" priority="3">
+        <lane id="e32_main_cw_0" index="0" speed="13.89" length="92.80" shape="592.80,608.00 500.00,608.00"/>
+        <lane id="e32_main_cw_1" index="1" speed="13.89" length="92.80" shape="592.80,604.80 500.00,604.80"/>
+        <lane id="e32_main_cw_2" index="2" speed="13.89" length="92.80" shape="592.80,601.60 500.00,601.60"/>
+    </edge>
+    <edge id="e32_main_e" from="R3C2_E" to="R3C2_C" priority="3">
+        <lane id="e32_main_e_0" index="0" speed="13.89" length="92.80" shape="700.00,608.00 607.20,608.00"/>
+        <lane id="e32_main_e_1" index="1" speed="13.89" length="92.80" shape="700.00,604.80 607.20,604.80"/>
+        <lane id="e32_main_e_2" index="2" speed="13.89" length="92.80" shape="700.00,601.60 607.20,601.60"/>
+    </edge>
+    <edge id="e32_main_w" from="R3C2_W" to="R3C2_C" priority="3">
+        <lane id="e32_main_w_0" index="0" speed="13.89" length="92.80" shape="500.00,592.00 592.80,592.00"/>
+        <lane id="e32_main_w_1" index="1" speed="13.89" length="92.80" shape="500.00,595.20 592.80,595.20"/>
+        <lane id="e32_main_w_2" index="2" speed="13.89" length="92.80" shape="500.00,598.40 592.80,598.40"/>
+    </edge>
+    <edge id="e32_side_cn" from="R3C2_C" to="R3C2_N" priority="2">
+        <lane id="e32_side_cn_0" index="0" speed="8.33" length="86.40" shape="601.60,613.60 601.60,700.00"/>
+    </edge>
+    <edge id="e32_side_cs" from="R3C2_C" to="R3C2_S" priority="2">
+        <lane id="e32_side_cs_0" index="0" speed="8.33" length="86.40" shape="598.40,586.40 598.40,500.00"/>
+    </edge>
+    <edge id="e32_side_n" from="R3C2_N" to="R3C2_C" priority="2">
+        <lane id="e32_side_n_0" index="0" speed="8.33" length="86.40" shape="598.40,700.00 598.40,613.60"/>
+    </edge>
+    <edge id="e32_side_s" from="R3C2_S" to="R3C2_C" priority="2">
+        <lane id="e32_side_s_0" index="0" speed="8.33" length="86.40" shape="601.60,500.00 601.60,586.40"/>
+    </edge>
+
+    <tlLogic id="R3C2_C" type="static" programID="0" offset="0">
+        <phase duration="42" state="rrrGGGGgrrrGGGGg"/>
+        <phase duration="3"  state="rrryyyyyrrryyyyy"/>
+        <phase duration="41" state="GGgrrrrrGGgrrrrr"/>
+        <phase duration="3"  state="yyyrrrrryyyrrrrr"/>
+        <phase duration="1"  state="rrrrrrrrrrrrrrrr"/>
+    </tlLogic>
+
+    <junction id="R3C2_C" type="traffic_light" x="600.00" y="600.00" incLanes="e32_side_n_0 e32_main_e_0 e32_main_e_1 e32_main_e_2 e32_side_s_0 e32_main_w_0 e32_main_w_1 e32_main_w_2" intLanes=":R3C2_C_0_0 :R3C2_C_1_0 :R3C2_C_14_0 :R3C2_C_3_0 :R3C2_C_4_0 :R3C2_C_4_1 :R3C2_C_4_2 :R3C2_C_7_0 :R3C2_C_8_0 :R3C2_C_15_0 :R3C2_C_10_0 :R3C2_C_11_0 :R3C2_C_11_1 :R3C2_C_11_2" shape="596.80,613.60 603.20,613.60 603.64,611.38 604.20,610.60 604.98,610.04 605.98,609.71 607.20,609.60 607.20,590.40 604.98,589.96 604.20,589.40 603.64,588.62 603.31,587.62 603.20,586.40 596.80,586.40 596.36,588.62 595.80,589.40 595.02,589.96 594.02,590.29 592.80,590.40 592.80,609.60 595.02,610.04 595.80,610.60 596.36,611.38 596.69,612.38">
+        <request index="0"  response="00000001110000" foes="00000001110000" cont="0"/>
+        <request index="1"  response="11110001110000" foes="11111001110000" cont="0"/>
+        <request index="2"  response="11100101110000" foes="11100101110000" cont="1"/>
+        <request index="3"  response="00000000000000" foes="00000100000000" cont="0"/>
+        <request index="4"  response="00000000000100" foes="00001100000111" cont="0"/>
+        <request index="5"  response="00000000000100" foes="00001100000111" cont="0"/>
+        <request index="6"  response="00001000000100" foes="00001100000111" cont="0"/>
+        <request index="7"  response="11100000000000" foes="11100000000000" cont="0"/>
+        <request index="8"  response="11100001111000" foes="11100001111100" cont="0"/>
+        <request index="9"  response="11100001110010" foes="11100001110010" cont="1"/>
+        <request index="10" response="00000000000000" foes="00000000000010" cont="0"/>
+        <request index="11" response="00001000000000" foes="00001110000110" cont="0"/>
+        <request index="12" response="00001000000000" foes="00001110000110" cont="0"/>
+        <request index="13" response="00001000000100" foes="00001110000110" cont="0"/>
+    </junction>
+    <junction id="R3C2_E" type="dead_end" x="700.00" y="600.00" incLanes="e32_main_ce_0 e32_main_ce_1 e32_main_ce_2" intLanes="" shape="700.00,600.00 700.00,590.40 700.00,600.00"/>
+    <junction id="R3C2_N" type="dead_end" x="600.00" y="700.00" incLanes="e32_side_cn_0" intLanes="" shape="600.00,700.00 603.20,700.00 600.00,700.00"/>
+    <junction id="R3C2_S" type="dead_end" x="600.00" y="500.00" incLanes="e32_side_cs_0" intLanes="" shape="600.00,500.00 596.80,500.00 600.00,500.00"/>
+    <junction id="R3C2_W" type="dead_end" x="500.00" y="600.00" incLanes="e32_main_cw_0 e32_main_cw_1 e32_main_cw_2" intLanes="" shape="500.00,600.00 500.00,609.60 500.00,600.00"/>
+
+    <junction id=":R3C2_C_14_0" type="internal" x="599.08" y="606.59" incLanes=":R3C2_C_2_0 e32_side_s_0" intLanes=":R3C2_C_4_0 :R3C2_C_4_1 :R3C2_C_4_2 :R3C2_C_7_0 :R3C2_C_8_0 :R3C2_C_11_0 :R3C2_C_11_1 :R3C2_C_11_2"/>
+    <junction id=":R3C2_C_15_0" type="internal" x="600.92" y="593.41" incLanes=":R3C2_C_9_0 e32_side_n_0" intLanes=":R3C2_C_0_0 :R3C2_C_1_0 :R3C2_C_4_0 :R3C2_C_4_1 :R3C2_C_4_2 :R3C2_C_11_0 :R3C2_C_11_1 :R3C2_C_11_2"/>
+
+    <connection from="e32_main_e" to="e32_side_cn" fromLane="0" toLane="0" via=":R3C2_C_3_0" tl="R3C2_C" linkIndex="3" dir="r" state="O"/>
+    <connection from="e32_main_e" to="e32_main_cw" fromLane="0" toLane="0" via=":R3C2_C_4_0" tl="R3C2_C" linkIndex="4" dir="s" state="O"/>
+    <connection from="e32_main_e" to="e32_main_cw" fromLane="1" toLane="1" via=":R3C2_C_4_1" tl="R3C2_C" linkIndex="5" dir="s" state="O"/>
+    <connection from="e32_main_e" to="e32_main_cw" fromLane="2" toLane="2" via=":R3C2_C_4_2" tl="R3C2_C" linkIndex="6" dir="s" state="O"/>
+    <connection from="e32_main_w" to="e32_side_cs" fromLane="0" toLane="0" via=":R3C2_C_10_0" tl="R3C2_C" linkIndex="11" dir="r" state="O"/>
+    <connection from="e32_main_w" to="e32_main_ce" fromLane="0" toLane="0" via=":R3C2_C_11_0" tl="R3C2_C" linkIndex="12" dir="s" state="O"/>
+    <connection from="e32_main_w" to="e32_main_ce" fromLane="1" toLane="1" via=":R3C2_C_11_1" tl="R3C2_C" linkIndex="13" dir="s" state="O"/>
+    <connection from="e32_main_w" to="e32_main_ce" fromLane="2" toLane="2" via=":R3C2_C_11_2" tl="R3C2_C" linkIndex="14" dir="s" state="O"/>
+    <connection from="e32_side_n" to="e32_main_cw" fromLane="0" toLane="0" via=":R3C2_C_0_0" tl="R3C2_C" linkIndex="0" dir="r" state="o"/>
+    <connection from="e32_side_n" to="e32_side_cs" fromLane="0" toLane="0" via=":R3C2_C_1_0" tl="R3C2_C" linkIndex="1" dir="s" state="o"/>
+    <connection from="e32_side_n" to="e32_main_ce" fromLane="0" toLane="2" via=":R3C2_C_2_0" tl="R3C2_C" linkIndex="2" dir="l" state="o"/>
+    <connection from="e32_side_s" to="e32_main_ce" fromLane="0" toLane="0" via=":R3C2_C_7_0" tl="R3C2_C" linkIndex="8" dir="r" state="o"/>
+    <connection from="e32_side_s" to="e32_side_cn" fromLane="0" toLane="0" via=":R3C2_C_8_0" tl="R3C2_C" linkIndex="9" dir="s" state="o"/>
+    <connection from="e32_side_s" to="e32_main_cw" fromLane="0" toLane="2" via=":R3C2_C_9_0" tl="R3C2_C" linkIndex="10" dir="l" state="o"/>
+
+    <connection from=":R3C2_C_0" to="e32_main_cw" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from=":R3C2_C_1" to="e32_side_cs" fromLane="0" toLane="0" dir="s" state="M"/>
+    <connection from=":R3C2_C_2" to="e32_main_ce" fromLane="0" toLane="2" via=":R3C2_C_14_0" dir="l" state="m"/>
+    <connection from=":R3C2_C_14" to="e32_main_ce" fromLane="0" toLane="2" dir="l" state="M"/>
+    <connection from=":R3C2_C_3" to="e32_side_cn" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from=":R3C2_C_4" to="e32_main_cw" fromLane="0" toLane="0" dir="s" state="M"/>
+    <connection from=":R3C2_C_4" to="e32_main_cw" fromLane="1" toLane="1" dir="s" state="M"/>
+    <connection from=":R3C2_C_4" to="e32_main_cw" fromLane="2" toLane="2" dir="s" state="M"/>
+    <connection from=":R3C2_C_7" to="e32_main_ce" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from=":R3C2_C_8" to="e32_side_cn" fromLane="0" toLane="0" dir="s" state="M"/>
+    <connection from=":R3C2_C_9" to="e32_main_cw" fromLane="0" toLane="2" via=":R3C2_C_15_0" dir="l" state="m"/>
+    <connection from=":R3C2_C_15" to="e32_main_cw" fromLane="0" toLane="2" dir="l" state="M"/>
+    <connection from=":R3C2_C_10" to="e32_side_cs" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from=":R3C2_C_11" to="e32_main_ce" fromLane="0" toLane="0" dir="s" state="M"/>
+    <connection from=":R3C2_C_11" to="e32_main_ce" fromLane="1" toLane="1" dir="s" state="M"/>
+    <connection from=":R3C2_C_11" to="e32_main_ce" fromLane="2" toLane="2" dir="s" state="M"/>
+
+</net>

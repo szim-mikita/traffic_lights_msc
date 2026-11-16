@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<additional>
+  <inductionLoop id="e1_e32_side_n_0" lane="e32_side_n_0" pos="61.40" freq="60" file="detectors.out.xml" />
+  <inductionLoop id="e1_e32_main_e_0" lane="e32_main_e_0" pos="67.80" freq="60" file="detectors.out.xml" />
+  <inductionLoop id="e1_e32_main_e_1" lane="e32_main_e_1" pos="67.80" freq="60" file="detectors.out.xml" />
+  <inductionLoop id="e1_e32_main_e_2" lane="e32_main_e_2" pos="67.80" freq="60" file="detectors.out.xml" />
+  <inductionLoop id="e1_e32_side_s_0" lane="e32_side_s_0" pos="61.40" freq="60" file="detectors.out.xml" />
+  <inductionLoop id="e1_e32_main_w_0" lane="e32_main_w_0" pos="67.80" freq="60" file="detectors.out.xml" />
+  <inductionLoop id="e1_e32_main_w_1" lane="e32_main_w_1" pos="67.80" freq="60" file="detectors.out.xml" />
+  <inductionLoop id="e1_e32_main_w_2" lane="e32_main_w_2" pos="67.80" freq="60" file="detectors.out.xml" />
+</additional>
