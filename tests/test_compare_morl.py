@@ -37,7 +37,7 @@ class CompareMORLTests(unittest.TestCase):
                 "reward_scales": [10_000.0, 10.0, 1.0],
             }
         }
-        with patch.object(compare_morl, "CatalogueTrafficMOEnv", return_value=StubEnv()) as make_env:
+        with patch.object(compare_morl, "TrafficMORLEnv", return_value=StubEnv()) as make_env:
             compare_morl.build_env(
                 results,
                 simulation_time=900,

@@ -12,7 +12,7 @@ import numpy as np
 import torch
 from morl_baselines.multi_policy.pcn.pcn import PCN
 
-from gym_envs.envs.catalogue_morl_env import CatalogueTrafficMOEnv
+from gym_envs.envs.morl_env import TrafficMORLEnv
 from train_morl import CATALOGUE_SUMO_DIR
 
 
@@ -39,7 +39,7 @@ def build_env(
     all_components = tuple(environment["reward_components"])
     components = reward_components or all_components
     component_indices = [all_components.index(component) for component in components]
-    base_env = CatalogueTrafficMOEnv(
+    base_env = TrafficMORLEnv(
         net_file=CATALOGUE_SUMO_DIR / "mega_catalogue_final.net.xml",
         logic_json_file=CATALOGUE_SUMO_DIR / "traffic_lights.json",
         detector_file=CATALOGUE_SUMO_DIR / "mega_catalogue_final.detectors.add.xml",

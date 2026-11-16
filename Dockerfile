@@ -5,9 +5,6 @@ ENV SUMO_HOME=/usr/share/sumo
 ENV VIRTUAL_ENV=/opt/venv
 ENV PYTHONPATH=/app
 ENV PATH="$VIRTUAL_ENV/bin:$SUMO_HOME/tools:$PATH"
-ENV TRAIN_MODE=train
-ENV EPISODES=10
-ENV MAX_STEPS=10000
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

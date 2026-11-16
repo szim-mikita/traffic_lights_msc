@@ -29,12 +29,8 @@ skills-lock.json
 *.csv
 *.log
 
-# Keep only the SUMO inputs used by the default environments.
+# Keep only the catalogue assets used by this branch.
 sumo_files/*
-!sumo_files/SmartCity.sumocfg
-!sumo_files/SC_SU-102022_v01.net.xml
-!sumo_files/dynamic_routes.rou.xml
-!sumo_files/SmartCity2.add.xml
 !sumo_files/AI_agens_konyvtar/
 sumo_files/AI_agens_konyvtar/*
 !sumo_files/AI_agens_konyvtar/mega_catalogue_final.net.xml

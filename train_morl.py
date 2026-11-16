@@ -11,12 +11,11 @@ import mo_gymnasium
 import numpy as np
 from morl_baselines.multi_policy.pcn.pcn import PCN
 
-from gym_envs.envs.state_traffic_env import (
+from gym_envs.envs.morl_env import (
     MO_REWARD_COMPONENTS,
     MO_REWARD_DEFAULT_SCALES,
-    StateTrafficMOEnv,
+    TrafficMORLEnv,
 )
-from gym_envs.envs.catalogue_morl_env import CatalogueTrafficMOEnv
 
 
 CATALOGUE_SUMO_DIR = (
@@ -161,14 +160,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--total-timesteps", type=int, default=10_000)
     parser.add_argument("--num-seconds", type=int, default=3600)
-    parser.add_argument("--traffic-scale", type=float, default=1.0)
-    parser.add_argument("--sumo-config", type=Path, default=None)
-    parser.add_argument(
-        "--environment",
-        choices=("state", "catalogue"),
-        default="state",
-        help="Use the fixed-config state env or the catalogue-file MORL env.",
-    )
     parser.add_argument(
         "--net-file",
         type=Path,
@@ -246,37 +237,22 @@ def main() -> None:
         if len(values) != expected:
             raise ValueError(f"{name} needs {expected} values for the selected objectives.")
 
-    if args.environment == "catalogue":
-        if args.sumo_config is not None:
-            raise ValueError("--sumo-config applies only to --environment state.")
-        base_env = CatalogueTrafficMOEnv(
-            net_file=args.net_file,
-            logic_json_file=args.logic_json_file,
-            detector_file=args.detector_file,
-            traffic_light_id=args.traffic_light_id,
-            route_file=args.route_file,
-            render_mode=args.render_mode,
-            simulation_time=args.num_seconds,
-            random_traffic=args.random_traffic,
-            flow_range=args.flow_range,
-            reward_components=args.reward_components,
-            reward_normalization=args.reward_normalization,
-            reward_scales=reward_scales,
-            state_penalty_threshold=args.state_penalty_threshold,
-            state_penalty_growth=args.state_penalty_growth,
-        )
-    else:
-        base_env = StateTrafficMOEnv(
-            render_mode=args.render_mode,
-            simulation_time=args.num_seconds,
-            traffic_scale=args.traffic_scale,
-            sumo_config=args.sumo_config,
-            reward_components=args.reward_components,
-            reward_normalization=args.reward_normalization,
-            reward_scales=reward_scales,
-            state_penalty_threshold=args.state_penalty_threshold,
-            state_penalty_growth=args.state_penalty_growth,
-        )
+    base_env = TrafficMORLEnv(
+        net_file=args.net_file,
+        logic_json_file=args.logic_json_file,
+        detector_file=args.detector_file,
+        traffic_light_id=args.traffic_light_id,
+        route_file=args.route_file,
+        render_mode=args.render_mode,
+        simulation_time=args.num_seconds,
+        random_traffic=args.random_traffic,
+        flow_range=args.flow_range,
+        reward_components=args.reward_components,
+        reward_normalization=args.reward_normalization,
+        reward_scales=reward_scales,
+        state_penalty_threshold=args.state_penalty_threshold,
+        state_penalty_growth=args.state_penalty_growth,
+    )
     env = mo_gymnasium.wrappers.MORecordEpisodeStatistics(
         gym.wrappers.FlattenObservation(base_env)
     )

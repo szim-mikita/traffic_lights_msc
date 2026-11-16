@@ -1,4 +1,5 @@
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
@@ -6,253 +7,410 @@ import gymnasium as gym
 import mo_gymnasium
 import numpy as np
 from morl_baselines.multi_policy.pcn.pcn import PCN
-from gymnasium import spaces
 
-from gym_envs.envs import state_traffic_env
-from gym_envs.envs.state_traffic_env import StateTrafficEnv, StateTrafficMOEnv
+from gym_envs.envs import morl_env
 
 
-class StateTrafficMOEnvTests(unittest.TestCase):
-    def _reward_env(
-        self,
-        reward_components=("co2",),
-        reward_normalization="average",
-        reward_scales=None,
-        env_type=StateTrafficMOEnv,
-    ):
-        env = object.__new__(env_type)
-        env.edges = ["edge-0"]
-        env.detectors = ["detector-0", "detector-1"]
-        env.current_state = 0
-        env.action_space = spaces.Discrete(3)
-        env.current_step = 0
-        env.time_limit = 100
-        env.time_in_state = 45
-        env.min_waiting_time = 5
-        env.transitions = state_traffic_env.STATE_TRAFFIC_TRANSITION_SEQUENCES
-        env.states = state_traffic_env.STATE_TRAFFIC_STATE_MAP
-        env.observation_history = {"state": [0]}
-        env.reward_components = tuple(reward_components)
-        env.reward_normalization = reward_normalization
-        env.reward_scales = np.asarray(
-            reward_scales or [1.0] * len(reward_components), dtype=np.float32
-        )
-        env.state_penalty_threshold = 45.0
-        env.state_penalty_growth = 0.1
-        return env
+SUMO_ASSETS = Path(__file__).resolve().parents[1] / "sumo_files" / "AI_agens_konyvtar"
 
-    def test_available_reward_components_use_induction_loop_metrics(self):
-        env = self._reward_env(reward_components=state_traffic_env.MO_REWARD_COMPONENTS)
-        with (
-            patch.object(state_traffic_env.traci.edge, "getCO2Emission", return_value=12000),
-            patch.object(
-                state_traffic_env.traci.inductionloop,
-                "getLaneID",
-                side_effect=["lane-0", "lane-1"],
-            ),
-            patch.object(
-                state_traffic_env.traci.lane,
-                "getLastStepVehicleIDs",
-                side_effect=[["v0", "v1"], ["v2"]],
-            ),
-            patch.object(
-                state_traffic_env.traci.vehicle,
-                "getWaitingTime",
-                side_effect=[2.0, 4.0, 6.0],
-            ),
-            patch.object(
-                state_traffic_env.traci.vehicle,
-                "getSpeed",
-                side_effect=[0.0, 5.0, 0.0],
-            ),
-            patch.object(
-                state_traffic_env.traci.inductionloop,
-                "getLastStepVehicleNumber",
-                side_effect=[2, 1],
-            ),
-            patch.object(
-                state_traffic_env.traci.inductionloop,
-                "getLastStepMeanSpeed",
-                side_effect=[10.0, 16.0],
-            ),
-        ):
-            metrics = env._get_available_metrics()
-        with patch.object(env, "_get_available_metrics", return_value=metrics):
-            reward = env._get_reward()
 
-        self.assertEqual(
-            metrics,
-            {
-                "co2": -12000,
-                "throughput": 3.0,
-                "average_speed": 12.0,
-                "waiting_time": -4.0,
-                "queue_length": -2.0,
-                "time_in_state_penalty": 0.0,
-            },
-        )
-        np.testing.assert_array_equal(
-            reward,
-            [-12000.0, 3.0, 12.0, -4.0, -2.0, 0.0],
-        )
+class TrafficMORLEnvTests(unittest.TestCase):
+    def _make_env(self, **kwargs):
+        simulation_time = kwargs.pop("simulation_time", 60)
+        with patch.object(morl_env.sumolib, "checkBinary", return_value="sumo"):
+            return morl_env.TrafficMORLEnv(
+                net_file=SUMO_ASSETS / "mega_catalogue_final.net.xml",
+                logic_json_file=SUMO_ASSETS / "traffic_lights.json",
+                detector_file=SUMO_ASSETS / "mega_catalogue_final.detectors.add.xml",
+                traffic_light_id="R3C2_C",
+                simulation_time=simulation_time,
+                **kwargs,
+            )
 
-    def test_scalar_environment_reward_formula_is_preserved(self):
-        env = self._reward_env(env_type=StateTrafficEnv)
-        with patch.object(
-            state_traffic_env.traci.edge, "getCO2Emission", return_value=2000
-        ):
-            reward = env._get_reward()
+    def test_catalogue_builds_discrete_morl_agent_and_random_routes(self):
+        env = self._make_env()
+        try:
+            self.assertEqual(env.action_space.n, 12)
+            self.assertEqual(env.observation_space["occupancy"].shape, (8,))
+            self.assertEqual(env.reward_space.shape, (2,))
+            self.assertEqual(env.agent.jid, "R3C2_C")
 
-        self.assertAlmostEqual(reward, -0.2 + 1 - np.exp(0.45) - 10)
+            route_file = env.generate_random_traffic(
+                flow_range=(600, 600), duration=60, seed=7
+            )
+            trips = ET.parse(route_file).getroot().findall("trip")
+            self.assertGreater(len(trips), 0)
+            self.assertTrue(all(trip.get("departLane") is not None for trip in trips))
 
-    def test_post_threshold_penalty_is_flat_until_45_seconds_then_exponential(self):
-        env = self._reward_env(
-            reward_components=("time_in_state_penalty",),
+            wrapped_env = mo_gymnasium.wrappers.MORecordEpisodeStatistics(
+                gym.wrappers.FlattenObservation(env)
+            )
+            agent = PCN(
+                env=wrapped_env,
+                scaling_factor=np.ones(3, dtype=np.float32),
+                log=False,
+                seed=7,
+            )
+            self.assertEqual(agent.action_dim, 12)
+            self.assertEqual(agent.reward_dim, 2)
+            self.assertEqual(wrapped_env.observation_space.shape, (26,))
+        finally:
+            env.close()
+
+    def test_reset_and_step_return_gymnasium_morl_values(self):
+        env = self._make_env(
+            reward_components=("co2", "time_in_state_penalty"),
             reward_normalization="average",
         )
         with (
-            patch.object(state_traffic_env.traci.edge, "getCO2Emission", return_value=0),
+            patch.object(morl_env.traci, "start"),
+            patch.object(morl_env.traci, "close"),
             patch.object(
-                state_traffic_env.traci.inductionloop,
-                "getLaneID",
-                return_value="lane",
+                morl_env.traci.trafficlight,
+                "setRedYellowGreenState",
+            ),
+            patch.object(morl_env.traci, "simulationStep"),
+            patch.object(
+                morl_env.traci.simulation,
+                "getMinExpectedNumber",
+                return_value=1,
+            ),
+        ):
+            try:
+                observation, reset_info = env.reset(seed=3)
+                self.assertEqual(reset_info["traffic_light_id"], "R3C2_C")
+                self.assertTrue(env.observation_space.contains(observation))
+
+                with patch.object(
+                    env.agent,
+                    "collect_measurements",
+                    return_value={
+                        "co2": -100.0,
+                        "throughput": 1.0,
+                        "average_speed": 5.0,
+                        "waiting_time": -2.0,
+                        "queue_length": -1.0,
+                    },
+                ):
+                    observation, reward, terminated, truncated, info = env.step(1)
+
+                self.assertTrue(env.observation_space.contains(observation))
+                self.assertEqual(reward.shape, (2,))
+                self.assertTrue(np.all(np.isfinite(reward)))
+                self.assertFalse(terminated)
+                self.assertFalse(truncated)
+                self.assertEqual(
+                    info["elapsed_seconds"],
+                    5
+                    + sum(
+                        duration
+                        for duration, _ in env.agent.transitions[(0, 1)]
+                    )
+                    + 5,
+                )
+                self.assertEqual(info["measured_seconds"], 10)
+                self.assertEqual(env.agent.current_logic_idx, 1)
+            finally:
+                env.close()
+
+    def test_state_penalty_stays_finite_for_long_phases(self):
+        env = self._make_env(
+            reward_components=("time_in_state_penalty",),
+            reward_normalization="average",
+        )
+        try:
+            env.agent.phase_timer = 100_000
+
+            reward = env._reward_for_metrics(
+                {
+                    "co2": 0.0,
+                    "throughput": 0.0,
+                    "average_speed": 0.0,
+                    "waiting_time": 0.0,
+                    "queue_length": 0.0,
+                }
+            )
+
+            self.assertTrue(np.all(np.isfinite(reward)))
+            self.assertEqual(reward.tolist(), [-morl_env.MAX_STATE_PENALTY])
+        finally:
+            env.close()
+
+    def test_step_does_not_exceed_episode_time_limit(self):
+        env = self._make_env(simulation_time=8)
+        with (
+            patch.object(morl_env.traci, "start"),
+            patch.object(morl_env.traci, "close"),
+            patch.object(
+                morl_env.traci.trafficlight,
+                "setRedYellowGreenState",
+            ),
+            patch.object(morl_env.traci, "simulationStep"),
+            patch.object(
+                morl_env.traci.simulation,
+                "getMinExpectedNumber",
+                return_value=1,
             ),
             patch.object(
-                state_traffic_env.traci.lane,
+                env.agent,
+                "collect_measurements",
+                return_value={
+                    "co2": -100.0,
+                    "throughput": 1.0,
+                    "average_speed": 5.0,
+                    "waiting_time": -2.0,
+                    "queue_length": -1.0,
+                },
+            ),
+        ):
+            try:
+                env.reset(seed=5)
+                _, _, terminated, _, _ = env.step(0)
+                _, _, terminated, _, info = env.step(0)
+
+                self.assertTrue(terminated)
+                self.assertEqual(info["elapsed_seconds"], 3)
+                self.assertEqual(env.current_step, 8)
+            finally:
+                env.close()
+
+    def test_terminal_transition_still_returns_measured_reward(self):
+        env = self._make_env(simulation_time=2, min_green_time=1)
+        with (
+            patch.object(morl_env.traci, "start"),
+            patch.object(morl_env.traci, "close"),
+            patch.object(
+                morl_env.traci.trafficlight,
+                "setRedYellowGreenState",
+            ),
+            patch.object(morl_env.traci, "simulationStep"),
+            patch.object(
+                morl_env.traci.simulation,
+                "getMinExpectedNumber",
+                return_value=1,
+            ),
+            patch.object(
+                env.agent,
+                "collect_measurements",
+                return_value={
+                    "co2": -100.0,
+                    "throughput": 1.0,
+                    "average_speed": 5.0,
+                    "waiting_time": -2.0,
+                    "queue_length": -1.0,
+                },
+            ),
+        ):
+            try:
+                env.reset(seed=6)
+                _, reward, terminated, _, info = env.step(1)
+
+                self.assertTrue(terminated)
+                self.assertEqual(info["elapsed_seconds"], 2)
+                self.assertEqual(info["measured_seconds"], 2)
+                self.assertTrue(np.all(np.isfinite(reward)))
+                self.assertTrue(env.agent.is_transitioning)
+            finally:
+                env.close()
+
+    def test_fixed_time_program_uses_native_signal_without_agent_overrides(self):
+        env = self._make_env(reward_components=("co2", "queue_length"))
+        with (
+            patch.object(morl_env.traci, "start"),
+            patch.object(morl_env.traci, "close"),
+            patch.object(
+                morl_env.traci.trafficlight,
+                "setRedYellowGreenState",
+            ) as set_state,
+            patch.object(
+                morl_env.traci.trafficlight, "setProgram"
+            ) as set_program,
+            patch.object(
+                morl_env.traci.trafficlight,
+                "getProgram",
+                return_value="0",
+            ),
+            patch.object(morl_env.traci, "simulationStep"),
+            patch.object(
+                morl_env.traci.simulation,
+                "getMinExpectedNumber",
+                return_value=1,
+            ),
+            patch.object(
+                env.agent,
+                "collect_measurements",
+                return_value={
+                    "co2": -100.0,
+                    "throughput": 1.0,
+                    "average_speed": 5.0,
+                    "waiting_time": -2.0,
+                    "queue_length": -1.0,
+                },
+            ),
+        ):
+            try:
+                env.reset(seed=9)
+                env.activate_fixed_time_program()
+                self.assertEqual(
+                    env._fixed_program_phase_kinds,
+                    {
+                        0: "main",
+                        1: "transition",
+                        2: "main",
+                        3: "transition",
+                        4: "transition",
+                    },
+                )
+                _, reward, terminated, truncated, info = env.step_fixed_time()
+
+                set_program.assert_called_once_with("R3C2_C", "0")
+                self.assertEqual(set_state.call_count, 1)
+                self.assertEqual(reward.shape, (2,))
+                self.assertFalse(terminated)
+                self.assertFalse(truncated)
+                self.assertEqual(info["signal_program"], "0")
+                self.assertEqual(info["elapsed_seconds"], 5)
+                self.assertEqual(env.current_step, 5)
+            finally:
+                env.close()
+
+    def test_signal_trace_records_actual_state_each_simulation_second(self):
+        env = self._make_env(reward_components=("co2", "queue_length"))
+        env.record_signal_trace = True
+        main_state = env.agent.states[0]
+        transition_state = env.agent.transitions[(0, 1)][0][1]
+        target_state = env.agent.states[1]
+
+        def signal_for_time():
+            if env.current_step <= env.min_green_time:
+                return main_state
+            if env.current_step <= env.min_green_time + sum(
+                duration for duration, _ in env.agent.transitions[(0, 1)]
+            ):
+                return transition_state
+            return target_state
+
+        with (
+            patch.object(morl_env.traci, "start"),
+            patch.object(morl_env.traci, "close"),
+            patch.object(
+                morl_env.traci.trafficlight,
+                "setRedYellowGreenState",
+            ),
+            patch.object(
+                morl_env.traci.trafficlight, "setProgram"
+            ),
+            patch.object(
+                morl_env.traci.trafficlight,
+                "getRedYellowGreenState",
+                side_effect=lambda _jid: signal_for_time(),
+            ),
+            patch.object(
+                morl_env.traci.trafficlight,
+                "getProgram",
+                return_value="0",
+            ),
+            patch.object(morl_env.traci, "simulationStep"),
+            patch.object(
+                morl_env.traci.simulation,
+                "getMinExpectedNumber",
+                return_value=1,
+            ),
+            patch.object(
+                env.agent,
+                "collect_measurements",
+                return_value={
+                    "co2": -100.0,
+                    "throughput": 1.0,
+                    "average_speed": 5.0,
+                    "waiting_time": -2.0,
+                    "queue_length": -1.0,
+                },
+            ),
+            patch.object(
+                morl_env.traci.lane,
+                "getCO2Emission",
+                return_value=0.0,
+            ),
+            patch.object(
+                morl_env.traci.lane,
+                "getLastStepHaltingNumber",
+                return_value=0,
+            ),
+            patch.object(
+                morl_env.traci.lane,
                 "getLastStepVehicleIDs",
                 return_value=[],
             ),
             patch.object(
-                state_traffic_env.traci.inductionloop,
+                morl_env.traci.inductionloop,
                 "getLastStepVehicleNumber",
                 return_value=0,
             ),
             patch.object(
-                state_traffic_env.traci.inductionloop,
+                morl_env.traci.inductionloop,
                 "getLastStepMeanSpeed",
-                return_value=-1.0,
-            ),
-        ):
-            self.assertEqual(float(env._get_reward()[0]), 0.0)
-            env.time_in_state = 44
-            self.assertEqual(float(env._get_reward()[0]), 0.0)
-            env.time_in_state = 60
-            self.assertAlmostEqual(
-                float(env._get_reward()[0]), -np.expm1(1.5), delta=1e-6
-            )
-
-    def test_time_aggregation_modes_and_component_scales(self):
-        expected_average = np.asarray([2.0, -4.0], dtype=np.float64)
-        for mode, expected in (
-            ("sum", [10.0, -20.0]),
-            ("average", [2.0, -4.0]),
-            ("normalized_average", [1.0, -2.0]),
-        ):
-            env = self._reward_env(
-                reward_components=("throughput", "queue_length"),
-                reward_normalization=mode,
-                reward_scales=[2.0, 2.0],
-            )
-            env._skip_n_steps = lambda n, observe=True, reward=False: expected_average
-            observation = {
-                "mean_speed": np.zeros(2, dtype=np.float32),
-                "occupancy": np.zeros(2, dtype=np.float32),
-                "vehicles": np.zeros(2, dtype=np.float32),
-                "state": 0,
-                "time_in_state": np.float32(45),
-            }
-            env._get_obs = lambda: observation
-            with patch.object(state_traffic_env.traci, "trafficlight"):
-                actual, reward_vector, terminated, truncated, info = env.step(0)
-
-            np.testing.assert_allclose(reward_vector, expected)
-            self.assertIs(actual, observation)
-            self.assertFalse(terminated)
-            self.assertFalse(truncated)
-            self.assertEqual(info["elapsed_seconds"], 5)
-
-    def test_invalid_reward_configuration_fails_early(self):
-        with (
-            patch.object(state_traffic_env.sumolib, "checkBinary", return_value="/usr/bin/sumo"),
-            patch.object(state_traffic_env.traci, "start"),
-            patch.object(
-                state_traffic_env.traci.inductionloop,
-                "getIDList",
-                return_value=["detector-0"],
-            ),
-            patch.object(state_traffic_env.traci.edge, "getIDList", return_value=[]),
-        ):
-            with self.assertRaisesRegex(ValueError, "Unknown reward components"):
-                StateTrafficMOEnv(reward_components=("unknown",))
-
-    def test_observations_are_per_detector_and_states_are_scalar_actions(self):
-        with (
-            patch.object(state_traffic_env.sumolib, "checkBinary", return_value="/usr/bin/sumo"),
-            patch.object(state_traffic_env.traci, "start"),
-            patch.object(
-                state_traffic_env.traci.inductionloop,
-                "getIDList",
-                return_value=["detector-0", "detector-1"],
-            ),
-            patch.object(state_traffic_env.traci.edge, "getIDList", return_value=[]),
-        ):
-            base_env = StateTrafficMOEnv(simulation_time=60)
-
-        try:
-            self.assertEqual(base_env.action_space.n, 3)
-            self.assertEqual(base_env.observation_space["mean_speed"].shape, (2,))
-            self.assertEqual(base_env.observation_space["occupancy"].shape, (2,))
-            self.assertEqual(base_env.observation_space["vehicles"].shape, (2,))
-            self.assertEqual(base_env.observation_space["state"].n, 3)
-            self.assertEqual(
-                list(base_env.observation_space.spaces),
-                ["mean_speed", "occupancy", "vehicles", "state", "time_in_state"],
-            )
-            env = mo_gymnasium.wrappers.MORecordEpisodeStatistics(
-                gym.wrappers.FlattenObservation(base_env)
-            )
-            agent = PCN(
-                env=env,
-                scaling_factor=np.ones(3, dtype=np.float32),
-                log=False,
-                seed=1,
-            )
-            self.assertEqual(env.observation_space.shape, (10,))
-            self.assertEqual(agent.action_dim, 3)
-            self.assertEqual(agent.reward_dim, 2)
-            self.assertTrue(Path(base_env.sumo_cmd[2]).is_file())
-        finally:
-            with patch.object(state_traffic_env.traci, "close"):
-                base_env.close()
-
-    def test_detector_observation_reads_loop_speed_occupancy_and_count(self):
-        env = self._reward_env()
-        env._reset_observation_history()
-        with (
-            patch.object(
-                state_traffic_env.traci.inductionloop,
-                "getLastStepMeanSpeed",
-                side_effect=[8.0, 12.0],
+                return_value=0.0,
             ),
             patch.object(
-                state_traffic_env.traci.inductionloop,
+                morl_env.traci.inductionloop,
                 "getLastStepOccupancy",
-                side_effect=[20.0, 40.0],
-            ),
-            patch.object(
-                state_traffic_env.traci.inductionloop,
-                "getLastStepVehicleNumber",
-                side_effect=[1, 3],
+                return_value=0.0,
             ),
         ):
-            env._get_detector_data()
-        env.time_in_state = 15
-        obs = env._get_obs()
-        np.testing.assert_array_equal(obs["mean_speed"], [8.0, 12.0])
-        np.testing.assert_array_equal(obs["occupancy"], [20.0, 40.0])
-        np.testing.assert_array_equal(obs["vehicles"], [1.0, 3.0])
-        self.assertEqual(obs["state"], 0)
-        self.assertEqual(obs["time_in_state"], 15.0)
+            try:
+                env.reset(seed=10)
+                env.step(1)
+
+                self.assertEqual(
+                    [(point["time"], point["kind"]) for point in env.signal_trace],
+                    [
+                        (0, "main"),
+                        (1, "main"),
+                        (2, "main"),
+                        (3, "main"),
+                        (4, "main"),
+                        (5, "main"),
+                        (6, "transition"),
+                        (7, "transition"),
+                        (8, "transition"),
+                        (9, "transition"),
+                        (10, "main"),
+                        (11, "main"),
+                        (12, "main"),
+                        (13, "main"),
+                        (14, "main"),
+                    ],
+                )
+            finally:
+                env.close()
+
+    def test_gui_mode_starts_sumo_without_manual_play(self):
+        env = self._make_env(render_mode="gui")
+        try:
+            args = env._sumo_args(Path("/tmp/routes.rou.xml"), 60, 7)
+            self.assertIn("--start", args)
+            self.assertIn(str(env._runtime_detector_file), args)
+            runtime_detector = ET.parse(env._runtime_detector_file).getroot()
+            self.assertTrue(
+                all(
+                    Path(detector.get("file")).parent
+                    == Path(env._temporary_sumo_dir.name)
+                    for detector in runtime_detector
+                    if detector.tag == "inductionLoop"
+                )
+            )
+
+            headless_env = self._make_env(render_mode="console")
+            try:
+                headless_args = headless_env._sumo_args(
+                    Path("/tmp/routes.rou.xml"), 60, 7
+                )
+                self.assertNotIn("--start", headless_args)
+            finally:
+                headless_env.close()
+        finally:
+            env.close()
 
 
 if __name__ == "__main__":

@@ -6,6 +6,8 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
 
 def load_results(path: Path) -> tuple[str, tuple[str, ...], np.ndarray]:
@@ -146,55 +148,88 @@ def plot_state_trace(trace_path: Path, output_path: Path) -> Path:
     trajectories = trace["states"]
     if not trajectories or any(not points for points in trajectories.values()):
         raise ValueError(f"{trace_path}: state trajectories must be non-empty.")
-    state_keys = list(
+    main_states = list(
         dict.fromkeys(
-            (point["state"], point.get("kind", "other"))
+            point["state"]
             for points in trajectories.values()
             for point in points
+            if point.get("kind", "other") == "main"
         )
     )
-    state_ids = {state: index for index, state in enumerate(state_keys)}
+    if not main_states:
+        raise ValueError(f"{trace_path}: trajectories contain no main states.")
+    state_ids = {state: index for index, state in enumerate(main_states)}
     figure, axes = plt.subplots(
-        1, len(trajectories), figsize=(8 * len(trajectories), 6), sharey=True
+        1,
+        len(trajectories),
+        figsize=(8 * len(trajectories), max(5, 2 + 0.45 * len(main_states))),
+        sharey=True,
     )
     axes = np.atleast_1d(axes)
     for axis, (policy, points) in zip(axes, trajectories.items()):
         times = [point["time"] for point in points]
-        states = [
-            state_ids[(point["state"], point.get("kind", "other"))]
+        main_state = next(
+            point["state"]
             for point in points
-        ]
-        axis.step(times, states, where="post", linewidth=1.5)
+            if point.get("kind", "other") == "main"
+        )
+        states = []
+        transition_spans = []
+        for index, point in enumerate(points):
+            if point.get("kind", "other") == "main":
+                main_state = point["state"]
+            states.append(state_ids[main_state])
+            end_time = (
+                points[index + 1]["time"]
+                if index + 1 < len(points)
+                else trace["simulation_time"]
+            )
+            if point.get("kind", "other") == "transition" and end_time > point["time"]:
+                if transition_spans and transition_spans[-1][1] == point["time"]:
+                    transition_spans[-1] = (transition_spans[-1][0], end_time)
+                else:
+                    transition_spans.append((point["time"], end_time))
+        for start, end in transition_spans:
+            axis.axvspan(
+                start,
+                end,
+                facecolor="0.8",
+                edgecolor="0.55",
+                alpha=0.35,
+                hatch="///",
+                linewidth=0,
+                zorder=0,
+            )
+        axis.step(times, states, where="post", linewidth=2, zorder=2)
         axis.set_title(policy)
         axis.set_xlabel("Simulation time (seconds)")
         axis.set_xlim(0, trace["simulation_time"])
-        axis.set_yticks(range(len(state_keys)))
+        axis.set_yticks(range(len(main_states)))
         axis.set_yticklabels(
-            [
-                f"S{index} ({kind})"
-                for index, (_, kind) in enumerate(state_keys)
-            ]
+            [f"M{index}: {state}" for index, state in enumerate(main_states)],
+            family="monospace",
+            fontsize=8,
         )
         axis.grid(True, axis="x", alpha=0.3)
-    axes[0].set_ylabel("Signal state")
-    mapping = "\n".join(
-        f"S{index} ({kind}) = {state}"
-        for index, (state, kind) in enumerate(state_keys)
+    axes[0].set_ylabel("Selectable main green state")
+    figure.legend(
+        handles=[
+            Line2D([0], [0], color="C0", linewidth=2, label="Main state"),
+            Patch(
+                facecolor="0.8",
+                edgecolor="0.55",
+                hatch="///",
+                label="Intergreen transition",
+            ),
+        ],
+        loc="upper center",
+        ncol=2,
     )
     figure.suptitle(
-        f"Intersection signal states, matched traffic seed {trace['seed']}",
-        y=0.98,
+        f"Selectable main states and intergreen periods — seed {trace['seed']}",
+        y=0.99,
     )
-    figure.subplots_adjust(bottom=0.26, top=0.88, wspace=0.05)
-    figure.text(
-        0.5,
-        0.02,
-        mapping,
-        ha="center",
-        va="bottom",
-        family="monospace",
-        fontsize=8,
-    )
+    figure.tight_layout(rect=(0, 0, 1, 0.94))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(figure)

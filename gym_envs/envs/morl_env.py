@@ -17,8 +17,25 @@ import sumolib
 import traci
 from gymnasium import spaces
 
-from .state_traffic_env import MO_REWARD_COMPONENTS, MO_REWARD_DEFAULT_SCALES
 from .traffic_lights_parser import load_traffic_light_program
+
+MO_REWARD_COMPONENTS = (
+    "co2",
+    "throughput",
+    "average_speed",
+    "waiting_time",
+    "queue_length",
+    "time_in_state_penalty",
+)
+
+MO_REWARD_DEFAULT_SCALES = {
+    "co2": 10_000.0,
+    "throughput": 1.0,
+    "average_speed": 13.89,
+    "waiting_time": 60.0,
+    "queue_length": 10.0,
+    "time_in_state_penalty": 1.0,
+}
 
 MAX_STATE_PENALTY = 100.0
 
@@ -243,7 +260,7 @@ class TrafficAgent:
         }
 
 
-class CatalogueTrafficMOEnv(gym.Env):
+class TrafficMORLEnv(gym.Env):
     """Single-policy MORL environment for a junction in a SUMO catalogue network.
 
     The SUMO inputs are the network, traffic-light catalogue, and detector
@@ -697,10 +714,27 @@ class CatalogueTrafficMOEnv(gym.Env):
             )
 
         self.agent.reset_step_metrics()
-        self.agent.set_target_phase(int(action))
         total_reward = np.zeros(len(self.reward_components), dtype=np.float64)
         measured_seconds = 0
         elapsed_seconds = 0
+        if (
+            int(action) != self.agent.current_logic_idx
+            and self.agent.phase_timer < self.min_green_time
+        ):
+            initial_green_seconds = min(
+                self.min_green_time - self.agent.phase_timer,
+                self.time_limit - self.current_step,
+            )
+            initial_reward, initial_measured = self._step_seconds(
+                initial_green_seconds,
+                include_transition_measurements=True,
+            )
+            total_reward += initial_reward
+            measured_seconds += initial_measured
+            elapsed_seconds += initial_green_seconds
+
+        if self.current_step < self.time_limit:
+            self.agent.set_target_phase(int(action))
         if self.agent.is_transitioning:
             full_transition_seconds = sum(
                 duration for duration, _ in self.agent.transition_queue
