@@ -142,7 +142,7 @@ def compare(
         raise ValueError("Saved replay returns do not match the objective components.")
     desired_return = replay_returns.mean(axis=0)
     max_return = np.asarray(training["max_return"], dtype=np.float32)
-    checkpoint = model_path or (results_path.parent.parent / results["model_path"])
+    checkpoint = model_path or (Path(__file__).resolve().parent / results["model_path"])
 
     model_env = build_env(results, simulation_time, flow_range)
     try:

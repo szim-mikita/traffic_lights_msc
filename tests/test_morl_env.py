@@ -30,10 +30,14 @@ class TrafficMORLEnvTests(unittest.TestCase):
     def test_catalogue_builds_discrete_morl_agent_and_random_routes(self):
         env = self._make_env()
         try:
-            self.assertEqual(env.action_space.n, 12)
+            self.assertEqual(env.action_space.n, 13)
             self.assertEqual(env.observation_space["occupancy"].shape, (8,))
             self.assertEqual(env.reward_space.shape, (2,))
             self.assertEqual(env.agent.jid, "R3C2_C")
+            self.assertEqual(
+                env._actuated_program_logic.type,
+                morl_env.traci.constants.TRAFFICLIGHT_TYPE_ACTUATED,
+            )
 
             route_file = env.generate_random_traffic(
                 flow_range=(600, 600), duration=60, seed=7
@@ -51,11 +55,27 @@ class TrafficMORLEnvTests(unittest.TestCase):
                 log=False,
                 seed=7,
             )
-            self.assertEqual(agent.action_dim, 12)
+            self.assertEqual(agent.action_dim, 13)
             self.assertEqual(agent.reward_dim, 2)
             self.assertEqual(wrapped_env.observation_space.shape, (26,))
         finally:
             env.close()
+
+    def test_exploration_action_space_uses_actuated_and_random_phase_mix(self):
+        action_space = morl_env.ExplorationActionSpace(
+            phase_count=4, actuated_probability=0.75
+        )
+        action_space.seed(23)
+
+        actions = [action_space.sample() for _ in range(10_000)]
+
+        self.assertAlmostEqual(
+            action_space.actuated_samples / len(actions),
+            0.75,
+            delta=0.03,
+        )
+        self.assertEqual(action_space.random_phase_samples, 10_000 - action_space.actuated_samples)
+        self.assertTrue(all(action in range(4) for action in actions if action != 4))
 
     def test_reset_and_step_return_gymnasium_morl_values(self):
         env = self._make_env(
@@ -133,6 +153,32 @@ class TrafficMORLEnvTests(unittest.TestCase):
 
             self.assertTrue(np.all(np.isfinite(reward)))
             self.assertEqual(reward.tolist(), [-morl_env.MAX_STATE_PENALTY])
+        finally:
+            env.close()
+
+    def test_state_penalty_is_sigmoid_shaped_and_saturating(self):
+        env = self._make_env(
+            reward_components=("time_in_state_penalty",),
+            reward_normalization="average",
+        )
+        try:
+            metrics = {
+                "co2": 0.0,
+                "throughput": 0.0,
+                "average_speed": 0.0,
+                "waiting_time": 0.0,
+                "queue_length": 0.0,
+            }
+            costs = []
+            for phase_timer in (45, 55, 65, 75):
+                env.agent.phase_timer = phase_timer
+                costs.append(-env._reward_for_metrics(metrics)[0])
+
+            self.assertEqual(costs[0], 0.0)
+            self.assertGreater(costs[1], costs[0])
+            self.assertGreater(costs[2], costs[1])
+            self.assertGreater(costs[3], costs[2])
+            self.assertLess(costs[3] - costs[2], costs[2] - costs[1])
         finally:
             env.close()
 
@@ -271,6 +317,72 @@ class TrafficMORLEnvTests(unittest.TestCase):
                 self.assertEqual(info["signal_program"], "0")
                 self.assertEqual(info["elapsed_seconds"], 5)
                 self.assertEqual(env.current_step, 5)
+            finally:
+                env.close()
+
+    def test_actuated_action_hands_control_back_at_next_catalogue_green(self):
+        env = self._make_env(
+            reward_components=("co2", "queue_length"),
+            reward_normalization="average",
+        )
+        start_phase = env._actuated_main_phase_indices[0]
+        transition_phase = next(
+            index
+            for index, (source, target, is_main) in env._actuated_phase_metadata.items()
+            if source == 0 and target == 1 and not is_main
+        )
+        target_phase = env._actuated_main_phase_indices[1]
+        metrics = {
+            "co2": -100.0,
+            "throughput": 1.0,
+            "average_speed": 5.0,
+            "waiting_time": -2.0,
+            "queue_length": -1.0,
+        }
+        with (
+            patch.object(morl_env.traci, "start"),
+            patch.object(morl_env.traci, "close"),
+            patch.object(
+                morl_env.traci.trafficlight, "setRedYellowGreenState"
+            ) as set_state,
+            patch.object(morl_env.traci.trafficlight, "setProgramLogic") as set_logic,
+            patch.object(morl_env.traci.trafficlight, "setProgram") as set_program,
+            patch.object(morl_env.traci.trafficlight, "setPhase") as set_phase,
+            patch.object(
+                morl_env.traci.trafficlight,
+                "getPhase",
+                side_effect=(start_phase, transition_phase, target_phase),
+            ),
+            patch.object(morl_env.traci, "simulationStep"),
+            patch.object(
+                morl_env.traci.simulation,
+                "getMinExpectedNumber",
+                return_value=1,
+            ),
+            patch.object(env.agent, "collect_measurements", return_value=metrics),
+        ):
+            try:
+                env.reset(seed=11)
+                observation, reward, terminated, truncated, info = env.step(
+                    env.actuated_action
+                )
+
+                set_logic.assert_called_once_with(
+                    "R3C2_C", env._actuated_program_logic
+                )
+                set_program.assert_called_once_with(
+                    "R3C2_C", env._actuated_program_id
+                )
+                set_phase.assert_called_once_with("R3C2_C", start_phase)
+                self.assertEqual(set_state.call_count, 2)
+                self.assertEqual(observation["phase"].tolist(), [1])
+                self.assertEqual(env.agent.phase_timer, 1)
+                self.assertEqual(info["control_mode"], "sumo_actuated")
+                self.assertEqual(info["elapsed_seconds"], 3)
+                self.assertEqual(info["measured_seconds"], 2)
+                self.assertEqual(reward.shape, (2,))
+                self.assertFalse(terminated)
+                self.assertFalse(truncated)
             finally:
                 env.close()
 

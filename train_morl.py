@@ -14,6 +14,7 @@ from morl_baselines.multi_policy.pcn.pcn import PCN
 from gym_envs.envs.morl_env import (
     MO_REWARD_COMPONENTS,
     MO_REWARD_DEFAULT_SCALES,
+    ExplorationActionSpace,
     TrafficMORLEnv,
 )
 
@@ -54,6 +55,51 @@ class TrainingProgressWrapper(gym.Wrapper):
             print()
 
 
+def _epsilon_at_step(
+    step: int, epsilon_start: float, epsilon_end: float, decay_steps: int
+) -> float:
+    fraction = min(step / decay_steps, 1.0)
+    return epsilon_start + fraction * (epsilon_end - epsilon_start)
+
+
+class ExploratoryPCN(PCN):
+    """PCN with scheduled epsilon exploration during policy rollouts."""
+
+    def __init__(
+        self,
+        epsilon_start: float,
+        epsilon_end: float,
+        epsilon_decay_steps: int,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.epsilon_start = epsilon_start
+        self.epsilon_end = epsilon_end
+        self.epsilon_decay_steps = epsilon_decay_steps
+        self.epsilon_schedule_steps = 0
+        self.epsilon_exploration_actions = 0
+        self.policy_actions = 0
+
+    def _act(self, obs, desired_return, desired_horizon, eval_mode=False):
+        if eval_mode:
+            return super()._act(obs, desired_return, desired_horizon, eval_mode)
+
+        if self.epsilon_schedule_steps == 0:
+            self.epsilon_schedule_steps = self.global_step
+        epsilon = _epsilon_at_step(
+            self.epsilon_schedule_steps,
+            self.epsilon_start,
+            self.epsilon_end,
+            self.epsilon_decay_steps,
+        )
+        self.epsilon_schedule_steps += 1
+        if self.np_random.random() < epsilon:
+            self.epsilon_exploration_actions += 1
+            return self.env.action_space.sample()
+        self.policy_actions += 1
+        return super()._act(obs, desired_return, desired_horizon, eval_mode)
+
+
 def run_train(
     env: gym.Env,
     total_timesteps: int,
@@ -70,10 +116,31 @@ def run_train(
     seed: int,
     model_name: str = "PCN_model",
     results_dir: str | Path = "runs",
+    epsilon_start: float = 0.2,
+    epsilon_end: float = 0.02,
+    epsilon_decay_steps: int | None = None,
+    actuated_exploration_probability: float = 0.75,
+    max_buffer_size: int = 100,
+    num_points_pf: int = 100,
+    num_eval_weights_for_eval: int = 50,
 ) -> PCN:
     """Train PCN, saving its policy and a compact training/evaluation record."""
+    if total_timesteps <= 0:
+        raise ValueError("total_timesteps must be positive.")
     if initial_episodes < 4:
         raise ValueError("PCN requires at least four initial episodes.")
+    if not 0.0 <= epsilon_end <= epsilon_start <= 1.0:
+        raise ValueError("epsilon values must satisfy 0 <= end <= start <= 1.")
+    if not 0.0 <= actuated_exploration_probability <= 1.0:
+        raise ValueError(
+            "actuated_exploration_probability must be between 0 and 1."
+        )
+    if epsilon_decay_steps is None:
+        epsilon_decay_steps = max(1, total_timesteps)
+    if epsilon_decay_steps <= 0:
+        raise ValueError("epsilon_decay_steps must be positive.")
+    if max_buffer_size <= 0 or num_points_pf <= 0 or num_eval_weights_for_eval <= 0:
+        raise ValueError("PCN buffer size and evaluation counts must be positive.")
 
     reward_dim = env.unwrapped.reward_space.shape[0]
     if scaling_factor.shape != (reward_dim + 1,):
@@ -85,7 +152,13 @@ def run_train(
         raise ValueError(f"max_return and ref_point must each contain {reward_dim} values.")
 
     progress_env = TrainingProgressWrapper(env, total_timesteps)
-    agent = PCN(
+    if isinstance(progress_env.action_space, ExplorationActionSpace):
+        progress_env.action_space.set_actuated_probability(
+            actuated_exploration_probability
+        )
+        progress_env.action_space.reset_sample_counts()
+    progress_env.action_space.seed(seed)
+    agent = ExploratoryPCN(
         env=progress_env,
         scaling_factor=scaling_factor,
         learning_rate=learning_rate,
@@ -94,6 +167,9 @@ def run_train(
         hidden_dim=hidden_dim,
         log=False,
         seed=seed,
+        epsilon_start=epsilon_start,
+        epsilon_end=epsilon_end,
+        epsilon_decay_steps=epsilon_decay_steps,
     )
     try:
         agent.train(
@@ -104,6 +180,9 @@ def run_train(
             num_step_episodes=step_episodes,
             num_model_updates=model_updates,
             max_return=max_return,
+            max_buffer_size=max_buffer_size,
+            num_points_pf=num_points_pf,
+            num_eval_weights_for_eval=num_eval_weights_for_eval,
         )
     finally:
         progress_env.finish_progress()
@@ -111,15 +190,27 @@ def run_train(
     evaluated_returns, replay_returns, return_distances = agent.evaluate(
         env, max_return, n=10
     )
-    results_path = Path(results_dir) / f"{model_name}_results.json"
+    created_at = datetime.now(timezone.utc)
+    results_path = (
+        Path(results_dir)
+        / created_at.date().isoformat()
+        / f"{model_name}_results.json"
+    )
     results_path.parent.mkdir(parents=True, exist_ok=True)
+    action_space = progress_env.action_space
     results = {
-        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "created_at_utc": created_at.isoformat(),
         "model_path": str(Path("weights") / f"{model_name}.pt"),
         "environment": {
             "class": type(env.unwrapped).__name__,
             "traffic_light_id": getattr(env.unwrapped, "traffic_light_id", None),
             "simulation_time": getattr(env.unwrapped, "simulation_time", None),
+            "random_traffic": getattr(env.unwrapped, "random_traffic", None),
+            "route_file": (
+                str(env.unwrapped.route_file)
+                if getattr(env.unwrapped, "route_file", None) is not None
+                else None
+            ),
             "flow_range": (
                 list(env.unwrapped.flow_range)
                 if hasattr(env.unwrapped, "flow_range")
@@ -128,8 +219,19 @@ def run_train(
             "reward_components": list(env.unwrapped.reward_components),
             "reward_normalization": env.unwrapped.reward_normalization,
             "reward_scales": env.unwrapped.reward_scales.tolist(),
+            "min_green_time": getattr(env.unwrapped, "min_green_time", None),
+            "state_penalty_threshold": getattr(
+                env.unwrapped, "state_penalty_threshold", None
+            ),
+            "state_penalty_steepness": getattr(
+                env.unwrapped, "state_penalty_growth", None
+            ),
+            "actuated_max_green_time": getattr(
+                env.unwrapped, "actuated_max_green_time", None
+            ),
         },
         "training": {
+            "algorithm": "PCN",
             "total_timesteps": total_timesteps,
             "seed": seed,
             "scaling_factor": scaling_factor.tolist(),
@@ -142,6 +244,27 @@ def run_train(
             "hidden_dim": hidden_dim,
             "learning_rate": learning_rate,
             "gamma": gamma,
+            "epsilon_start": epsilon_start,
+            "epsilon_end": epsilon_end,
+            "epsilon_decay_steps": epsilon_decay_steps,
+            "actuated_exploration_probability": (
+                actuated_exploration_probability
+            ),
+            "random_phase_exploration_probability": (
+                1.0 - actuated_exploration_probability
+            ),
+            "max_buffer_size": max_buffer_size,
+            "num_points_pf": num_points_pf,
+            "num_eval_weights_for_eval": num_eval_weights_for_eval,
+            "epsilon_schedule_steps": agent.epsilon_schedule_steps,
+            "epsilon_exploration_actions": agent.epsilon_exploration_actions,
+            "policy_actions": agent.policy_actions,
+            "actuated_exploration_actions": getattr(
+                action_space, "actuated_samples", None
+            ),
+            "random_phase_exploration_actions": getattr(
+                action_space, "random_phase_samples", None
+            ),
         },
         "evaluation": {
             "episodes": len(evaluated_returns),
@@ -196,7 +319,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--reward-scales", type=float, nargs="+", default=None)
     parser.add_argument("--state-penalty-threshold", type=float, default=45.0)
-    parser.add_argument("--state-penalty-growth", type=float, default=0.1)
+    parser.add_argument(
+        "--state-penalty-steepness",
+        "--state-penalty-growth",
+        dest="state_penalty_growth",
+        type=float,
+        default=0.1,
+    )
+    parser.add_argument(
+        "--actuated-exploration-probability", type=float, default=0.75
+    )
+    parser.add_argument("--actuated-max-green-time", type=int, default=60)
     parser.add_argument("--initial-episodes", type=int, default=4)
     parser.add_argument("--step-episodes", type=int, default=1)
     parser.add_argument("--model-updates", type=int, default=10)
@@ -204,6 +337,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hidden-dim", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--gamma", type=float, default=1.0)
+    parser.add_argument("--epsilon-start", type=float, default=0.2)
+    parser.add_argument("--epsilon-end", type=float, default=0.02)
+    parser.add_argument("--epsilon-decay-steps", type=int, default=None)
+    parser.add_argument("--max-buffer-size", type=int, default=100)
+    parser.add_argument("--num-points-pf", type=int, default=100)
+    parser.add_argument("--num-eval-weights-for-eval", type=int, default=50)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--model-name", default="PCN_model")
     parser.add_argument("--results-dir", type=Path, default=Path("runs"))
@@ -252,6 +391,8 @@ def main() -> None:
         reward_scales=reward_scales,
         state_penalty_threshold=args.state_penalty_threshold,
         state_penalty_growth=args.state_penalty_growth,
+        actuated_exploration_probability=args.actuated_exploration_probability,
+        actuated_max_green_time=args.actuated_max_green_time,
     )
     env = mo_gymnasium.wrappers.MORecordEpisodeStatistics(
         gym.wrappers.FlattenObservation(base_env)
@@ -274,6 +415,15 @@ def main() -> None:
             seed=args.seed,
             model_name=args.model_name,
             results_dir=args.results_dir,
+            epsilon_start=args.epsilon_start,
+            epsilon_end=args.epsilon_end,
+            epsilon_decay_steps=args.epsilon_decay_steps,
+            actuated_exploration_probability=(
+                args.actuated_exploration_probability
+            ),
+            max_buffer_size=args.max_buffer_size,
+            num_points_pf=args.num_points_pf,
+            num_eval_weights_for_eval=args.num_eval_weights_for_eval,
         )
     finally:
         env.close()

@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -28,7 +29,9 @@ class StubMORLEnv(gym.Env):
 
 class FakePCN:
     def __init__(self, **_kwargs):
-        pass
+        self.epsilon_schedule_steps = 8
+        self.epsilon_exploration_actions = 3
+        self.policy_actions = 5
 
     def train(self, **_kwargs):
         pass
@@ -44,6 +47,13 @@ class FakePCN:
 
 
 class TrainMORLTests(unittest.TestCase):
+    def test_epsilon_schedule_decays_linearly_and_clamps_at_end(self):
+        self.assertEqual(train_morl._epsilon_at_step(0, 0.2, 0.02, 10), 0.2)
+        self.assertAlmostEqual(train_morl._epsilon_at_step(5, 0.2, 0.02, 10), 0.11)
+        self.assertAlmostEqual(
+            train_morl._epsilon_at_step(20, 0.2, 0.02, 10), 0.02
+        )
+
     def test_training_progress_counts_actions_and_preserves_step_result(self):
         env = StubMORLEnv()
         progress_env = train_morl.TrainingProgressWrapper(env, total_timesteps=2)
@@ -61,7 +71,7 @@ class TrainMORLTests(unittest.TestCase):
     def test_run_train_saves_model_and_evaluation_results(self):
         env = StubMORLEnv()
         with tempfile.TemporaryDirectory() as directory:
-            with patch.object(train_morl, "PCN", FakePCN):
+            with patch.object(train_morl, "ExploratoryPCN", FakePCN):
                 train_morl.run_train(
                     env=env,
                     total_timesteps=16,
@@ -78,9 +88,16 @@ class TrainMORLTests(unittest.TestCase):
                     seed=7,
                     model_name="catalogue_test",
                     results_dir=directory,
+                    epsilon_start=0.25,
+                    epsilon_end=0.05,
+                    epsilon_decay_steps=12,
+                    actuated_exploration_probability=0.75,
                 )
 
-            results_path = Path(directory) / "catalogue_test_results.json"
+            date_folder = datetime.now(timezone.utc).date().isoformat()
+            results_path = (
+                Path(directory) / date_folder / "catalogue_test_results.json"
+            )
             results = json.loads(results_path.read_text(encoding="utf-8"))
             self.assertEqual(
                 results["environment"]["reward_components"],
@@ -88,6 +105,15 @@ class TrainMORLTests(unittest.TestCase):
             )
             self.assertEqual(results["evaluation"]["episodes"], 2)
             self.assertEqual(results["evaluation"]["returns"][0], [-1.0, -0.5])
+            self.assertEqual(results["training"]["algorithm"], "PCN")
+            self.assertEqual(results["training"]["epsilon_start"], 0.25)
+            self.assertEqual(results["training"]["epsilon_end"], 0.05)
+            self.assertEqual(results["training"]["epsilon_decay_steps"], 12)
+            self.assertEqual(results["training"]["epsilon_schedule_steps"], 8)
+            self.assertEqual(
+                results["training"]["random_phase_exploration_probability"],
+                0.25,
+            )
 
 
 if __name__ == "__main__":

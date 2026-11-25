@@ -40,6 +40,37 @@ MO_REWARD_DEFAULT_SCALES = {
 MAX_STATE_PENALTY = 100.0
 
 
+class ExplorationActionSpace(spaces.Discrete):
+    """Discrete phase actions plus a detector-actuated exploration action."""
+
+    def __init__(
+        self, phase_count: int, actuated_probability: float = 0.75
+    ) -> None:
+        super().__init__(phase_count + 1)
+        self.phase_count = phase_count
+        self.set_actuated_probability(actuated_probability)
+        self.actuated_samples = 0
+        self.random_phase_samples = 0
+
+    def set_actuated_probability(self, probability: float) -> None:
+        if not np.isfinite(probability) or not 0.0 <= probability <= 1.0:
+            raise ValueError("actuated_probability must be between 0 and 1.")
+        self.actuated_probability = float(probability)
+
+    def sample(self, mask=None, probability=None):
+        if mask is not None or probability is not None:
+            return super().sample(mask=mask, probability=probability)
+        if self.np_random.random() < self.actuated_probability:
+            self.actuated_samples += 1
+            return self.phase_count
+        self.random_phase_samples += 1
+        return int(self.np_random.integers(self.phase_count))
+
+    def reset_sample_counts(self) -> None:
+        self.actuated_samples = 0
+        self.random_phase_samples = 0
+
+
 class TrafficAgent:
     """Per-junction controller and measurement state, adapted to catalogue phases."""
 
@@ -290,6 +321,8 @@ class TrafficMORLEnv(gym.Env):
         reward_scales: Sequence[float] | None = None,
         state_penalty_threshold: float = 45.0,
         state_penalty_growth: float = 0.1,
+        actuated_exploration_probability: float = 0.75,
+        actuated_max_green_time: int = 60,
     ):
         super().__init__()
         if render_mode not in self.metadata["render_modes"]:
@@ -312,6 +345,10 @@ class TrafficMORLEnv(gym.Env):
             raise ValueError("state_penalty_threshold must be finite and non-negative.")
         if not np.isfinite(state_penalty_growth) or state_penalty_growth <= 0:
             raise ValueError("state_penalty_growth must be finite and positive.")
+        if actuated_max_green_time < min_green_time:
+            raise ValueError(
+                "actuated_max_green_time must be at least min_green_time."
+            )
 
         self.net_file = Path(net_file).resolve()
         self.logic_json_file = Path(logic_json_file).resolve()
@@ -336,6 +373,7 @@ class TrafficMORLEnv(gym.Env):
         ):
             raise ValueError("flow_range must be a positive (minimum, maximum) pair.")
         self.min_green_time = int(min_green_time)
+        self.actuated_max_green_time = int(actuated_max_green_time)
         self.measure_during_transition = measure_during_transition
         self._fixed_time_program_active = False
         self._fixed_program_phase_kinds: dict[int, str] = {}
@@ -437,7 +475,16 @@ class TrafficMORLEnv(gym.Env):
             )
 
         self.agent = self.agents[self.traffic_light_id]
-        self.action_space = self.agent.action_space
+        self.actuated_action = len(self.agent.states)
+        self.action_space = ExplorationActionSpace(
+            len(self.agent.states), actuated_exploration_probability
+        )
+        self._actuated_program_id = "morl_actuated_exploration"
+        (
+            self._actuated_program_logic,
+            self._actuated_main_phase_indices,
+            self._actuated_phase_metadata,
+        ) = self._build_actuated_program()
         self.observation_space = self.agent.observation_space
         self.reward_space = spaces.Box(
             low=-np.inf,
@@ -463,6 +510,52 @@ class TrafficMORLEnv(gym.Env):
         self.sumo_binary = sumolib.checkBinary(
             "sumo-gui" if render_mode == "gui" else "sumo"
         )
+
+    def _build_actuated_program(self):
+        """Build a SUMO actuated cycle from catalogue greens and intergreens."""
+        phases = []
+        main_phase_indices = {}
+        phase_metadata = {}
+        state_indices = sorted(self.agent.states)
+        for position, state_idx in enumerate(state_indices):
+            next_idx = state_indices[(position + 1) % len(state_indices)]
+            main_phase_indices[state_idx] = len(phases)
+            phase_metadata[len(phases)] = (state_idx, state_idx, True)
+            phases.append(
+                traci.trafficlight.Phase(
+                    duration=self.min_green_time,
+                    state=self.agent.states[state_idx],
+                    minDur=self.min_green_time,
+                    maxDur=self.actuated_max_green_time,
+                )
+            )
+            transition = self.agent.transitions.get((state_idx, next_idx))
+            if transition is None:
+                raise ValueError(
+                    "SUMO actuated exploration requires catalogue transitions "
+                    f"from state {state_idx} to {next_idx}."
+                )
+            for duration, signal_state in transition:
+                phase_metadata[len(phases)] = (state_idx, next_idx, False)
+                phases.append(
+                    traci.trafficlight.Phase(
+                        duration=duration,
+                        state=signal_state,
+                    )
+                )
+
+        logic = traci.trafficlight.Logic(
+            self._actuated_program_id,
+            traci.constants.TRAFFICLIGHT_TYPE_ACTUATED,
+            0,
+            phases,
+            {
+                "max-gap": "3",
+                "detector-gap": "2",
+                "passing-time": "2",
+            },
+        )
+        return logic, main_phase_indices, phase_metadata
 
     def _read_catalogue_light_ids(self) -> list[str]:
         with self.logic_json_file.open(encoding="utf-8") as file:
@@ -689,18 +782,127 @@ class TrafficMORLEnv(gym.Env):
 
     def _reward_for_metrics(self, metrics: dict[str, float]) -> np.ndarray:
         values = dict(metrics)
-        penalty_exponent = min(
-            self.state_penalty_growth
-            * max(0.0, self.agent.phase_timer - self.state_penalty_threshold),
-            np.log1p(MAX_STATE_PENALTY),
+        penalty_sigmoid = 1.0 / (
+            1.0
+            + np.exp(
+                -self.state_penalty_growth
+                * max(0.0, self.agent.phase_timer - self.state_penalty_threshold)
+            )
         )
-        values["time_in_state_penalty"] = -min(
-            float(np.expm1(penalty_exponent)),
-            MAX_STATE_PENALTY,
+        values["time_in_state_penalty"] = -MAX_STATE_PENALTY * (
+            2.0 * penalty_sigmoid - 1.0
         )
         return np.asarray(
             [values[name] for name in self.reward_components], dtype=np.float64
         )
+
+    def _step_actuated(self):
+        """Let SUMO extend the current green, then hand off at the next green."""
+        self.agent.reset_step_metrics()
+        start_state = self.agent.current_logic_idx
+        state_indices = sorted(self.agent.states)
+        start_position = state_indices.index(start_state)
+        target_state = state_indices[(start_position + 1) % len(state_indices)]
+        traci.trafficlight.setProgramLogic(
+            self.traffic_light_id, self._actuated_program_logic
+        )
+        traci.trafficlight.setProgram(
+            self.traffic_light_id, self._actuated_program_id
+        )
+        traci.trafficlight.setPhase(
+            self.traffic_light_id, self._actuated_main_phase_indices[start_state]
+        )
+
+        reward_sum = np.zeros(len(self.reward_components), dtype=np.float64)
+        measured_seconds = 0
+        elapsed_seconds = 0
+        was_main_phase = True
+        reached_target = False
+        transition_seconds = sum(
+            duration
+            for duration, _ in self.agent.transitions[(start_state, target_state)]
+        )
+        max_action_seconds = (
+            self.actuated_max_green_time + transition_seconds + 1
+        )
+        for _ in range(max_action_seconds):
+            if self.current_step >= self.time_limit:
+                break
+            traci.simulationStep()
+            self.current_step += 1
+            elapsed_seconds += 1
+            phase_index = traci.trafficlight.getPhase(self.traffic_light_id)
+            source_state, next_state, is_main = self._actuated_phase_metadata[
+                phase_index
+            ]
+            if is_main:
+                if not was_main_phase or self.agent.current_logic_idx != source_state:
+                    self.agent.current_logic_idx = source_state
+                    self.agent.phase_timer = 1
+                else:
+                    self.agent.phase_timer += 1
+                self.agent.target_logic_idx = source_state
+                self.agent.is_transitioning = False
+            else:
+                self.agent.target_logic_idx = next_state
+                self.agent.phase_timer = 0
+                self.agent.is_transitioning = True
+            was_main_phase = is_main
+            self.time_in_state = self.agent.phase_timer
+            self._record_signal_state()
+            if self.measure_during_transition or is_main:
+                reward_sum += self._reward_for_metrics(
+                    self.agent.collect_measurements()
+                )
+                measured_seconds += 1
+            if is_main and source_state == target_state:
+                reached_target = True
+                break
+            if traci.simulation.getMinExpectedNumber() <= 0:
+                break
+
+        if reached_target:
+            self.agent.current_logic_idx = target_state
+            self.agent.target_logic_idx = target_state
+            self.agent.is_transitioning = False
+            self.agent.transition_queue = []
+            self.agent.transition_cursor = 0
+            self.agent.transition_steps_remaining = 0
+            traci.trafficlight.setRedYellowGreenState(
+                self.traffic_light_id, self.agent.states[target_state]
+            )
+        elif (
+            self.current_step < self.time_limit
+            and traci.simulation.getMinExpectedNumber() > 0
+        ):
+            raise RuntimeError(
+                "SUMO actuated program did not reach its next catalogue green "
+                f"within {max_action_seconds} seconds."
+            )
+
+        if measured_seconds == 0:
+            raise RuntimeError("No simulation seconds were measured for this action.")
+        average_reward = reward_sum / measured_seconds
+        if self.reward_normalization == "sum":
+            reward = reward_sum
+        elif self.reward_normalization == "normalized_average":
+            reward = average_reward / self.reward_scales
+        else:
+            reward = average_reward
+        reward = np.asarray(reward, dtype=np.float32)
+        terminated = self.current_step >= self.time_limit
+        if not terminated:
+            terminated = traci.simulation.getMinExpectedNumber() <= 0
+        info = {
+            "elapsed_seconds": elapsed_seconds,
+            "measured_seconds": measured_seconds,
+            "traffic_light_id": self.traffic_light_id,
+            "control_mode": "sumo_actuated",
+            "reward_components": dict(
+                zip(self.reward_components, reward.tolist())
+            ),
+        }
+        return self.agent.get_observation(), reward, bool(terminated), False, info
 
     def step(self, action):
         if not self.is_running:
@@ -712,6 +914,8 @@ class TrafficMORLEnv(gym.Env):
                 f"Invalid action {action!r}; expected an action in "
                 f"[0, {self.action_space.n - 1}]."
             )
+        if int(action) == self.actuated_action:
+            return self._step_actuated()
 
         self.agent.reset_step_metrics()
         total_reward = np.zeros(len(self.reward_components), dtype=np.float64)
